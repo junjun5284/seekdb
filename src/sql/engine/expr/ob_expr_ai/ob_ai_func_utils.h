@@ -49,6 +49,11 @@ public:
     virtual int set_config_json_format(common::ObIAllocator &allocator, common::ObJsonObject *config) override;
     static int construct_messages_array(ObIAllocator &allocator, ObString &prompt, ObString &content, ObJsonArray *&messages);
     static int construct_message_obj(ObIAllocator &allocator, ObString &role, ObString &content, ObJsonObject *&message);
+    // OpenAI compatible endpoints may expose the generated content either under
+    // `choices[].message.content` or under `choices[].text` (legacy completions).
+    static int extract_choice_content(ObIAllocator &allocator,
+                                      common::ObJsonObject *http_response,
+                                      common::ObIJsonBase *&result);
   private:
     DISALLOW_COPY_AND_ASSIGN(ObOpenAIComplete);
   };
@@ -69,6 +74,12 @@ public:
     virtual int parse_output(common::ObIAllocator &allocator,
                              common::ObJsonObject *http_response,
                              common::ObIJsonBase *&result) override;
+    // Extracts one vector per input from the `data` array of the response.
+    // Every element carries the `index` of the input it belongs to, the
+    // elements may arrive in any order.
+    static int extract_embeddings(ObIAllocator &allocator,
+                                  common::ObJsonObject *http_response,
+                                  common::ObIJsonBase *&result);
   private:
     DISALLOW_COPY_AND_ASSIGN(ObOpenAIEmbed);
   };
@@ -100,6 +111,11 @@ public:
                              common::ObJsonObject *http_response,
                              common::ObIJsonBase *&result) override;
     virtual int set_config_json_format(common::ObIAllocator &allocator, common::ObJsonObject *config) override;
+    // Ollama native completion protocol puts the generated text under
+    // `response`, but chat style endpoints answer under `message.content`.
+    static int extract_response_text(ObIAllocator &allocator,
+                                     common::ObJsonObject *http_response,
+                                     common::ObIJsonBase *&result);
   private:
     DISALLOW_COPY_AND_ASSIGN(ObOllamaComplete);
   };
@@ -120,6 +136,11 @@ public:
     virtual int parse_output(common::ObIAllocator &allocator,
                              common::ObJsonObject *http_response,
                              common::ObIJsonBase *&result) override;
+    // Ollama native embedding protocol returns `embeddings` as an array of
+    // vectors; older builds answer with a single `embedding` vector.
+    static int extract_embeddings(ObIAllocator &allocator,
+                                  common::ObJsonObject *http_response,
+                                  common::ObIJsonBase *&result);
   private:
     DISALLOW_COPY_AND_ASSIGN(ObOllamaEmbed);
   };
@@ -242,6 +263,7 @@ public:
   static int get_json_string(ObIAllocator &allocator, ObString &str, ObJsonString *&str_node);
   static int get_json_int(ObIAllocator &allocator, int64_t num, ObJsonInt *&int_node);
   static int get_json_boolean(ObIAllocator &allocator, bool value, ObJsonBoolean *&boolean_node);
+  static int get_json_null(ObIAllocator &allocator, ObIJsonBase *&null_node);
   static int get_json_object_form_str(ObIAllocator &allocator, ObString &str, ObJsonObject *&obj_node);
   static int print_json_to_str(ObIAllocator &allocator, ObIJsonBase *base_node, ObString &str);
   static int compact_json_object(ObIAllocator &allocator, ObJsonObject *obj_node, ObJsonObject *compact_obj);
@@ -257,7 +279,6 @@ public:
   static int replace_meta_prompt(ObIAllocator &allocator, ObString &meta_prompt, ObString &key, ObString &content, ObString &result);
   DISALLOW_COPY_AND_ASSIGN(ObAIFuncPromptUtils);
 };
-
 class ObAIFuncProviderUtils 
 {
 public:
@@ -337,6 +358,11 @@ public:
   static int get_ai_func_info(ObIAllocator &allocator, const ObString &model_id,
                               share::schema::ObSchemaGetterGuard &guard, ObAIFuncExprInfo *&info);
   static int get_ai_func_info(ObIAllocator &allocator, const ObString &model_id, ObAIFuncExprInfo *&info);
+  // Returns true when the provider authenticates with an API key. Providers
+  // such as Ollama run locally and must stay usable with an empty access key.
+  static bool is_provider_require_access_key(const ObString &provider);
+  // Validates that the response content is a non empty text node.
+  static int check_not_empty_text(common::ObIJsonBase *result, const char *func_name);
 private:
   DISALLOW_COPY_AND_ASSIGN(ObAIFuncUtils);
 };
@@ -365,6 +391,8 @@ public:
    bool is_dense_embedding_type() {return info_.type_ == share::EndpointType::DENSE_EMBEDDING;}
    bool is_rerank_type() {return info_.type_ == share::EndpointType::RERANK;}
    const ObString get_request_model_name();
+   // Checks that every element of a returned vector is a number.
+   static int check_embedding_elements(common::ObIJsonBase *embedding);
    ObIAllocator *allocator_;
    const ObAIFuncExprInfo &info_;
    const share::ObAiModelEndpointInfo &endpoint_info_;
@@ -379,6 +407,18 @@ public:
   static bool is_valid_prompt_object(ObJsonObject* prompt_object);
   static int replace_all_str_args_in_template(ObIAllocator &allocator, ObJsonObject* prompt_object, ObString& replaced_prompt_str);
   static int construct_prompt_object(ObIAllocator &allocator, ObString &template_str, ObJsonArray *args_array, ObJsonObject *&prompt_object);
+  // Replaces every `{n}` placeholder of the template with the n-th argument.
+  // Arguments may be strings or JSON values; a JSON argument is rendered with
+  // its compact JSON representation. Placeholders may repeat and the same
+  // argument may be referenced several times.
+  static int replace_placeholders(ObIAllocator &allocator,
+                                  ObString &template_str,
+                                  ObJsonArray *args_array,
+                                  ObString &replaced_prompt_str);
+  // Extracts the template string and the argument array of a prompt object.
+  static int split_prompt_object(ObJsonObject *prompt_object,
+                                 ObString &template_str,
+                                 ObJsonArray *&args_array);
   static constexpr char prompt_template_key[20] = "template";
   static constexpr char prompt_args_key[20] = "args";
 private:
