@@ -30,6 +30,7 @@
 #include "sql/optimizer/ob_log_expr_values.h"
 #include "sql/optimizer/ob_log_function_table.h"
 #include "sql/optimizer/ob_log_json_table.h"
+#include "sql/engine/basic/ob_read_file_table_op.h"
 #include "sql/optimizer/ob_log_values.h"
 #include "sql/optimizer/ob_log_subplan_filter.h"
 #include "sql/optimizer/ob_log_subplan_scan.h"
@@ -5643,6 +5644,50 @@ int ObStaticEngineCG::generate_spec(ObLogJsonTable &op, ObJsonTableSpec &spec,
   return ret;
 }
 
+int ObStaticEngineCG::generate_spec(ObLogJsonTable &op, ObReadFileTableSpec &spec,
+    const bool in_root_job)
+{
+  UNUSED(in_root_job);
+  ObIAllocator &alloc = phy_plan_->get_allocator();
+  int ret = OB_SUCCESS;
+  if (OB_ISNULL(op.get_stmt())) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_FAIL(spec.column_exprs_.init(op.get_stmt()->get_column_size()))) {
+  } else {
+    // Copy file-access fields from the logical operator.
+    spec.file_format_ = static_cast<ObFileReadFormat>(op.get_read_file_format());
+    spec.skip_header_ = op.get_read_skip_header();
+    spec.has_header_ = op.get_read_has_header();
+    OZ (ob_write_string(alloc, op.get_read_file_path(), spec.file_path_));
+    OZ (ob_write_string(alloc, op.get_read_field_delimiter(), spec.field_delimiter_));
+    OZ (ob_write_string(alloc, op.get_read_line_delimiter(), spec.line_delimiter_));
+    OZ (ob_write_string(alloc, op.get_read_escape_char(), spec.escape_char_));
+    OZ (ob_write_string(alloc, op.get_read_enclosed_by(), spec.enclosed_by_));
+
+    // Resolve column expressions. For each column produced by the file
+    // we need a runtime ObExpr* that writes into the right datum.
+    for (int64_t i = 0; OB_SUCC(ret) && i < op.get_stmt()->get_column_size(); ++i) {
+      ObExpr *rt_expr = nullptr;
+      const ColumnItem *col_item = op.get_stmt()->get_column_item(i);
+      CK (OB_NOT_NULL(col_item));
+      CK (OB_NOT_NULL(col_item->expr_));
+      if (col_item->table_id_ == op.get_table_id()
+          && col_item->expr_->is_explicited_reference()) {
+        OZ (mark_expr_self_produced(col_item->expr_));
+        OZ (generate_rt_expr(*col_item->expr_, rt_expr));
+        if (OB_SUCC(ret) && is_lob_storage(rt_expr->obj_meta_.get_type())) {
+          rt_expr->obj_meta_.set_has_lob_header();
+        }
+        OZ (spec.column_exprs_.push_back(rt_expr));
+      }
+    }
+    if (OB_SUCC(ret)) {
+      spec.column_exprs_.set_count(spec.column_exprs_.count());
+    }
+  }
+  return ret;
+}
+
 int ObStaticEngineCG::generate_spec(ObLogStatCollector &op,
     ObStatCollectorSpec &spec, const bool in_root_job)
 {
@@ -6120,7 +6165,12 @@ int ObStaticEngineCG::get_phy_op_type(ObLogicalOperator &log_op,
       break;
     }
     case log_op_def::LOG_JSON_TABLE: {
-      type = PHY_JSON_TABLE;
+      auto &op = static_cast<ObLogJsonTable&>(log_op);
+      if (MulModeTableType::OB_READ_FILE_TABLE_TYPE == op.get_table_type()) {
+        type = PHY_READ_FILE_TABLE;
+      } else {
+        type = PHY_JSON_TABLE;
+      }
       break;
     }
     case log_op_def::LOG_MONITORING_DUMP: {

@@ -17497,62 +17497,77 @@ read_file_table_expr:
 READ_CSV '(' read_file_table_param_list ')' relation_name
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, $5, NULL);
+  $$->value_ = 1; /* CSV */
 }
 | READ_CSV '(' read_file_table_param_list ')' AS relation_name
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, $6, NULL);
+  $$->value_ = 1; /* CSV */
 }
 | READ_CSV '(' read_file_table_param_list ')'
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, NULL, NULL);
+  $$->value_ = 1; /* CSV */
 }
 | READ_JSON '(' read_file_table_param_list ')' relation_name
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, $5, NULL);
+  $$->value_ = 3; /* JSON */
 }
 | READ_JSON '(' read_file_table_param_list ')' AS relation_name
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, $6, NULL);
+  $$->value_ = 3; /* JSON */
 }
 | READ_JSON '(' read_file_table_param_list ')'
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, NULL, NULL);
+  $$->value_ = 3; /* JSON */
 }
 | READ_NDJSON '(' read_file_table_param_list ')' relation_name
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, $5, NULL);
+  $$->value_ = 2; /* NDJSON */
 }
 | READ_NDJSON '(' read_file_table_param_list ')' AS relation_name
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, $6, NULL);
+  $$->value_ = 2; /* NDJSON */
 }
 | READ_NDJSON '(' read_file_table_param_list ')'
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, NULL, NULL);
+  $$->value_ = 2; /* NDJSON */
 }
 | READ_PARQUET '(' read_file_table_param_list ')' relation_name
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, $5, NULL);
+  $$->value_ = 4; /* PARQUET */
 }
 | READ_PARQUET '(' read_file_table_param_list ')' AS relation_name
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, $6, NULL);
+  $$->value_ = 4; /* PARQUET */
 }
 | READ_PARQUET '(' read_file_table_param_list ')'
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, NULL, NULL);
+  $$->value_ = 4; /* PARQUET */
 }
 | GLOB '(' read_file_table_param_list ')' relation_name
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, $5, NULL);
+  $$->value_ = 5; /* GLOB */
 }
 | GLOB '(' read_file_table_param_list ')' AS relation_name
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, $6, NULL);
+  $$->value_ = 5; /* GLOB */
 }
 | GLOB '(' read_file_table_param_list ')'
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, NULL, NULL);
+  $$->value_ = 5; /* GLOB */
 }
 ;
 

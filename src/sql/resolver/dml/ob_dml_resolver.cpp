@@ -41,6 +41,8 @@
 #include "sql/resolver/dcl/ob_dcl_resolver.h"
 #include "sql/resolver/ddl/ob_ddl_resolver.h"
 #include "sql/hybrid_search/ob_hybrid_search_executor.h"
+#include "sql/engine/basic/ob_file_read_utils.h"
+#include "sql/resolver/ob_resolver_utils.h"
 
 namespace oceanbase
 {
@@ -2719,6 +2721,13 @@ int ObDMLResolver::resolve_table(const ParseNode &parse_tree,
         }
         break;
       }
+      case T_READ_FILE_TABLE_EXPRESSION: {
+        if (OB_ISNULL(session_info_)) {
+          ret = OB_INVALID_ARGUMENT;
+        } else if (OB_FAIL(resolve_read_file_item(*table_node, table_item))) {
+        }
+        break;
+      }
       case T_VALUES_TABLE_EXPRESSION: {
         if (OB_FAIL(resolve_values_table_item(*table_node, table_item))) {
         }
@@ -3762,6 +3771,255 @@ int ObDMLResolver::resolve_hybrid_search_item(const ParseNode &parse_tree, Table
 
   if (OB_SUCC(ret) && OB_NOT_NULL(params_.query_ctx_)) {
     params_.query_ctx_->has_hybrid_search_ = true;
+  }
+  return ret;
+}
+
+namespace {
+
+// Recursively collects all T_READ_FILE_TABLE_PARAM nodes from a T_LINK_NODE
+// chain or a single param node. Children are visited left-to-right so that
+// params appear in their original order.
+int collect_read_file_params(const ParseNode *node,
+                             common::ObIArray<const ParseNode*> &params)
+{
+  int ret = OB_SUCCESS;
+  if (OB_ISNULL(node)) {
+    // NULL child in the chain is fine, just stop.
+  } else if (node->type_ == T_LINK_NODE) {
+    if (OB_NOT_NULL(node->children_[0])) {
+      OZ (collect_read_file_params(node->children_[0], params));
+    }
+    if (OB_SUCC(ret) && OB_NOT_NULL(node->children_[1])) {
+      OZ (collect_read_file_params(node->children_[1], params));
+    }
+  } else if (node->type_ == T_READ_FILE_TABLE_PARAM) {
+    OZ (params.push_back(node));
+  } else {
+    ret = OB_ERR_PARSER_SYNTAX;
+    LOG_WARN("unexpected param node type", K(node->type_));
+  }
+  return ret;
+}
+
+inline common::ObString node_str(const ParseNode *n)
+{
+  return OB_ISNULL(n) ? common::ObString()
+                      : common::ObString(static_cast<int32_t>(n->str_len_), n->str_value_);
+}
+
+} // namespace
+
+int ObDMLResolver::resolve_read_file_item(const ParseNode &parse_tree, TableItem *&table_item)
+{
+  INIT_SUCC(ret);
+  ObDMLStmt *stmt = get_stmt();
+  TableItem *item = NULL;
+  ObJsonTableDef *table_def = NULL;
+  ColumnItem *col_item = NULL;
+  ParseNode *param_list_node = NULL;
+  ParseNode *alias_node = NULL;
+  ObString table_name;
+  ObString alias_name;
+  ObString file_path;
+  ObString resolved_path;
+  ObString secure_file_priv;
+  ObString field_delimiter(",");
+  ObString line_delimiter("\n");
+  ObString escape_char("\\");
+  ObString enclosed_by("\"");
+  int64_t skip_header = 0;
+  bool has_header = true;
+  auto file_format = static_cast<ObFileReadFormat>(parse_tree.value_);
+  common::ObSEArray<const ParseNode*, 8> params;
+  common::ObSEArray<ObFileColumnDef, 32> inferred_columns;
+
+  // --- 1. Validate parse node shape ---
+  if (T_READ_FILE_TABLE_EXPRESSION != parse_tree.type_ || 4 != parse_tree.num_child_) {
+    ret = OB_ERR_UNEXPECTED;
+    LOG_WARN("unexpected parse tree for read_file_table",
+             K(parse_tree.type_), K(parse_tree.num_child_));
+  } else if (OB_ISNULL(param_list_node = parse_tree.children_[0])) {
+    ret = OB_ERR_UNEXPECTED;
+  } else {
+    alias_node = parse_tree.children_[2]; // may be NULL
+    if (OB_NOT_NULL(alias_node)) {
+      alias_name = node_str(alias_node);
+      table_name = alias_name;
+    } else {
+      // derive a default table name from the function type
+      const char *default_tbl = "read_file";
+      table_name.assign_ptr(default_tbl, static_cast<int32_t>(strlen(default_tbl)));
+      alias_name = table_name;
+    }
+  }
+
+  // --- 2. Collect all parameters from the param list ---
+  if (OB_FAIL(ret)) {
+  } else if (OB_FAIL(collect_read_file_params(param_list_node, params))) {
+  } else if (params.count() <= 0) {
+    ret = OB_ERR_PARSER_SYNTAX;
+    LOG_USER_ERROR(OB_ERR_PARSER_SYNTAX, "read_csv/read_json/... requires at least a file path");
+  }
+
+  // --- 3. Interpret positional and named parameters ---
+  // The first parameter without a name is the file path. Subsequent named
+  // parameters (DELIMITER, SKIP_HEADER, etc.) configure the reader.
+  int64_t positional_idx = 0;
+  for (int64_t i = 0; OB_SUCC(ret) && i < params.count(); ++i) {
+    const ParseNode *p = params.at(i);
+    const ParseNode *name_node = p->children_[0];
+    const ParseNode *val_node = p->children_[1];
+    ObString name = node_str(name_node);
+    ObString value = node_str(val_node);
+    if (OB_ISNULL(name_node) || name.empty()) {
+      // positional argument
+      if (0 == positional_idx) {
+        file_path = value;
+        ++positional_idx;
+      } else {
+        ret = OB_ERR_PARSER_SYNTAX;
+        LOG_USER_ERROR(OB_ERR_PARSER_SYNTAX, "too many positional arguments");
+      }
+    } else {
+      // named argument
+      name.to_upper();
+      if (0 == name.case_compare("DELIMITER")) {
+        field_delimiter = value;
+      } else if (0 == name.case_compare("LINE_DELIMITER")) {
+        line_delimiter = value;
+      } else if (0 == name.case_compare("ESCAPE")) {
+        escape_char = value;
+      } else if (0 == name.case_compare("ENCLOSED")) {
+        enclosed_by = value;
+      } else if (0 == name.case_compare("SKIP_HEADER")) {
+        skip_header = ob_strntoll(value.ptr(), value.length(), 10, NULL, &ret);
+        if (OB_FAIL(ret)) { ret = OB_ERR_PARSER_SYNTAX; }
+      } else if (0 == name.case_compare("HAS_HEADER")) {
+        has_header = (value.length() > 0 &&
+                      (value.ptr()[0] == '1' || value.ptr()[0] == 't' ||
+                       value.ptr()[0] == 'T'));
+      } else if (0 == name.case_compare("HEADER")) {
+        has_header = (value.length() > 0 &&
+                      (value.ptr()[0] == '1' || value.ptr()[0] == 't' ||
+                       value.ptr()[0] == 'T'));
+      } else {
+        // Unknown named option is ignored (forward-compat).
+        LOG_INFO("ignore unknown read-file option", K(name), K(value));
+      }
+    }
+  }
+
+  if (OB_FAIL(ret)) {
+  } else if (file_path.empty()) {
+    ret = OB_ERR_PARSER_SYNTAX;
+    LOG_USER_ERROR(OB_ERR_PARSER_SYNTAX, "read_csv/read_json/... requires a file path");
+  }
+
+  // --- 4. Secure path check ---
+  if (OB_FAIL(ret)) {
+  } else if (OB_FAIL(session_info_->get_secure_file_priv(secure_file_priv))) {
+  } else if (OB_FAIL(ObFileReadUtils::check_and_resolve_path(secure_file_priv, file_path,
+                                                              *allocator_, resolved_path))) {
+    LOG_WARN("check secure path failed", K(file_path), K(ret));
+  }
+
+  // --- 5. Schema inference ---
+  if (OB_SUCC(ret)) {
+    switch (file_format) {
+      case ObFileReadFormat::CSV:
+        OZ (ObFileReadUtils::infer_csv_schema(resolved_path, *allocator_, inferred_columns));
+        break;
+      case ObFileReadFormat::NDJSON:
+        OZ (ObFileReadUtils::infer_ndjson_schema(resolved_path, *allocator_, inferred_columns));
+        break;
+      case ObFileReadFormat::JSON:
+        OZ (ObFileReadUtils::infer_json_schema(resolved_path, *allocator_, inferred_columns));
+        break;
+      case ObFileReadFormat::PARQUET:
+        OZ (ObFileReadUtils::infer_parquet_schema(resolved_path, *allocator_, inferred_columns));
+        break;
+      case ObFileReadFormat::GLOB: {
+        // GLOB expands a pattern and produces one column of matched paths.
+        common::ObSEArray<ObString, 32> files;
+        OZ (ObFileReadUtils::expand_glob(resolved_path, *allocator_, files));
+        ObFileColumnDef path_col;
+        path_col.name_.assign_ptr("pathname", strlen("pathname"));
+        path_col.data_type_.set_obj_type(ObVarcharType);
+        path_col.data_type_.set_length(ObAccuracy::DDL_DEFAULT_ACCURACY[ObVarcharType].get_length());
+        path_col.data_type_.set_charset_type(session_info_->get_local_charset().charset_type_);
+        path_col.data_type_.set_collation_type(session_info_->get_local_charset().collation_type_);
+        OZ (inferred_columns.push_back(path_col));
+        // Stash expanded list into table_def for later use by the physical op.
+        // (Store count temporarily via skip_header_ is NOT done; physical op
+        // will re-expand the pattern at scan time.)
+        break;
+      }
+      default:
+        ret = OB_ERR_PARSER_SYNTAX;
+        LOG_USER_ERROR(OB_ERR_PARSER_SYNTAX, "unknown file format");
+        break;
+    }
+  }
+
+  // --- 6. Create the JSON_TABLE item that carries the file definition ---
+  if (OB_FAIL(ret)) {
+  } else if (OB_ISNULL(item = stmt->create_table_item(*allocator_))) {
+    ret = OB_ALLOCATE_MEMORY_FAILED;
+  } else if (OB_ISNULL(table_def = static_cast<ObJsonTableDef*>(allocator_->alloc(sizeof(ObJsonTableDef))))) {
+    ret = OB_ALLOCATE_MEMORY_FAILED;
+  } else {
+    table_def = new (table_def) ObJsonTableDef();
+    table_def->table_type_ = MulModeTableType::OB_READ_FILE_TABLE_TYPE;
+    table_def->file_format_ = static_cast<int>(file_format);
+    table_def->skip_header_ = skip_header;
+    table_def->has_header_ = has_header;
+    OZ (ob_write_string(*allocator_, resolved_path, table_def->file_path_));
+    OZ (ob_write_string(*allocator_, field_delimiter, table_def->field_delimiter_));
+    OZ (ob_write_string(*allocator_, line_delimiter, table_def->line_delimiter_));
+    OZ (ob_write_string(*allocator_, escape_char, table_def->escape_char_));
+    OZ (ob_write_string(*allocator_, enclosed_by, table_def->enclosed_by_));
+  }
+
+  if (OB_FAIL(ret)) {
+  } else {
+    item->table_name_ = table_name;
+    item->alias_name_ = alias_name;
+    item->table_id_ = generate_table_id();
+    item->type_ = TableItem::JSON_TABLE;
+    item->json_table_def_ = table_def;
+    OZ (stmt->add_table_item(session_info_, item));
+  }
+
+  // --- 7. Build column items from inferred schema ---
+  for (int64_t i = 0; OB_SUCC(ret) && i < inferred_columns.count(); ++i) {
+    const ObFileColumnDef &col_def_src = inferred_columns.at(i);
+    ObDmlJtColDef *col_def = NULL;
+    if (OB_ISNULL(col_def = static_cast<ObDmlJtColDef*>(allocator_->alloc(sizeof(ObDmlJtColDef))))) {
+      ret = OB_ALLOCATE_MEMORY_FAILED;
+    } else {
+      col_def = new (col_def) ObDmlJtColDef();
+      col_def->table_id_ = item->table_id_;
+      col_def->col_base_info_.col_type_ = COL_TYPE_VALUE;
+      col_def->col_base_info_.parent_id_ = -1;
+      col_def->col_base_info_.id_ = i;
+      col_def->col_base_info_.output_column_idx_ = i;
+      col_def->col_base_info_.col_name_ = col_def_src.name_;
+      col_def->col_base_info_.data_type_ = col_def_src.data_type_;
+      OZ (table_def->all_cols_.push_back(&col_def->col_base_info_));
+    }
+    ColumnItem *new_col_item = NULL;
+    if (OB_FAIL(ret)) {
+    } else if (OB_FAIL(generate_json_table_output_column_item(item,
+                                                              col_def_src.data_type_,
+                                                              col_def_src.name_,
+                                                              i,
+                                                              new_col_item))) {
+    }
+  }
+
+  if (OB_SUCC(ret)) {
+    table_item = item;
   }
   return ret;
 }

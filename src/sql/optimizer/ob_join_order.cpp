@@ -8420,6 +8420,9 @@ int ObJoinOrder::generate_json_table_paths()
                                                                 json_path->subquery_exprs_,
                                                                 json_path->filter_,
                                                                 false /* with_onetime */ ))) {
+    } else if (MulModeTableType::OB_READ_FILE_TABLE_TYPE ==
+               table_item->json_table_def_->table_type_) {
+      // read-file table has no doc_exprs; skip the json-specific param binding.
     } else if (table_item->json_table_def_->doc_exprs_.empty()) {
       ret = OB_ERR_UNEXPECTED;
     } else if (OB_FAIL(param_json_table_expr(table_item->json_table_def_->doc_exprs_,

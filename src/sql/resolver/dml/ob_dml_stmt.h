@@ -47,6 +47,7 @@ enum MulModeTableType {
   OB_ORA_JSON_TABLE_TYPE, // 1
   OB_ORA_XML_TABLE_TYPE = 2,
   OB_UNNEST_TABLE_TYPE = 3,
+  OB_READ_FILE_TABLE_TYPE = 4,
 };
 
 typedef struct ObJtColBaseInfo
@@ -87,18 +88,38 @@ typedef struct ObJtColBaseInfo
    K_(output_column_idx), K_(col_name), K_(path), K_(parent_id), K_(id));
 } ObJtColBaseInfo;
 
+// Forward declare ObFileReadFormat for ObJsonTableDef extension.
+namespace sql { enum class ObFileReadFormat; }
+
 typedef struct ObJsonTableDef {
   ObJsonTableDef() 
     : all_cols_(),
       doc_exprs_(),
       table_type_(MulModeTableType::INVALID_TABLE_TYPE),
-      namespace_arr_() {}
+      namespace_arr_(),
+      file_path_(),
+      file_format_(0),
+      field_delimiter_(),
+      line_delimiter_(),
+      escape_char_(),
+      enclosed_by_(),
+      skip_header_(0),
+      has_header_(true) {}
 
   int deep_copy(const ObJsonTableDef& src, ObIRawExprCopier &expr_copier, ObIAllocator* allocator);
   common::ObSEArray<ObJtColBaseInfo*, 4, common::ModulePageAllocator, true> all_cols_;
   common::ObSEArray<ObRawExpr*, 1, common::ModulePageAllocator, true> doc_exprs_;
   MulModeTableType table_type_;
   common::ObSEArray<ObString, 16, common::ModulePageAllocator, true> namespace_arr_;
+  // Fields used when table_type_ == OB_READ_FILE_TABLE_TYPE:
+  common::ObString file_path_;
+  int file_format_;           // cast from ObFileReadFormat
+  common::ObString field_delimiter_;
+  common::ObString line_delimiter_;
+  common::ObString escape_char_;
+  common::ObString enclosed_by_;
+  int64_t skip_header_;
+  bool has_header_;
 } ObJsonTableDef;
 
 struct ObValuesTableDef {
