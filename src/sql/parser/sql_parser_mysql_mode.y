@@ -156,6 +156,9 @@
 %nonassoc PATH
 %nonassoc LOWER_THAN_BY_ACCESS_SESSION
 
+/* The named argument separator of the file reading table functions. */
+%nonassoc NAMED_ARG
+
 %token ERROR /*used internal*/
 %token PARSER_SYNTAX_ERROR /*used internal*/
 
@@ -323,6 +326,8 @@ END_P SET_VAR DELIMITER
 
         OBSOLETE OBJECT OCCUR OF OFF OFFSET OLD OLD_PASSWORD ONE ONE_SHOT ONLY OPEN OPTIONS ORDINALITY OURS OLD_KEY OVER
         OJ
+
+        READ_CSV READ_JSON READ_NDJSON READ_PARQUET GLOB
 
         PACK_KEYS PAGE PARALLEL PARAMETERS PARSER PARSER_PROPERTIES PARTIAL PARTITIONING PARTITIONS PASSWORD
         PATH PAUSE PER PERCENTAGE PERCENT_RANK PERCENTILE_CONT PHASE PHRASE PLAN PHYSICAL
@@ -500,6 +505,7 @@ END_P SET_VAR DELIMITER
 %type <node> vec_index_params vec_index_param vec_index_param_value opt_with_vector_index_parameters
 %type <node> json_table_expr unnest_expr mock_jt_on_error_on_empty jt_column_list json_table_column_def
 %type <node> json_table_ordinality_column_def json_table_exists_column_def json_table_value_column_def json_table_nested_column_def
+%type <node> read_file_table_expr read_file_table_param read_file_table_param_list
 %type <node> opt_value_on_empty_or_error_or_mismatch opt_on_mismatch
 %type <node> table_values_clause table_values_clause_with_order_by_and_limit values_row_list row_value
 %type <node> geometry_collection
@@ -10849,6 +10855,10 @@ tbl_name
 {
   $$ = $1;
 }
+| read_file_table_expr
+{
+  $$ = $1;
+}
 ;
 
 tbl_name:
@@ -17477,6 +17487,94 @@ literal
 | USER_VARIABLE
 {
   $$ = $1;
+}
+;
+
+/* The file reading table functions read a local file and expose it as a
+   relational table. The first argument is the file path, the remaining
+   arguments are named options. */
+read_file_table_expr:
+READ_CSV '(' read_file_table_param_list ')' relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, $5, NULL);
+}
+| READ_CSV '(' read_file_table_param_list ')' AS relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, $6, NULL);
+}
+| READ_CSV '(' read_file_table_param_list ')'
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, NULL, NULL);
+}
+| READ_JSON '(' read_file_table_param_list ')' relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, $5, NULL);
+}
+| READ_JSON '(' read_file_table_param_list ')' AS relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, $6, NULL);
+}
+| READ_JSON '(' read_file_table_param_list ')'
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, NULL, NULL);
+}
+| READ_NDJSON '(' read_file_table_param_list ')' relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, $5, NULL);
+}
+| READ_NDJSON '(' read_file_table_param_list ')' AS relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, $6, NULL);
+}
+| READ_NDJSON '(' read_file_table_param_list ')'
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, NULL, NULL);
+}
+| READ_PARQUET '(' read_file_table_param_list ')' relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, $5, NULL);
+}
+| READ_PARQUET '(' read_file_table_param_list ')' AS relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, $6, NULL);
+}
+| READ_PARQUET '(' read_file_table_param_list ')'
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, NULL, NULL);
+}
+| GLOB '(' read_file_table_param_list ')' relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, $5, NULL);
+}
+| GLOB '(' read_file_table_param_list ')' AS relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, $6, NULL);
+}
+| GLOB '(' read_file_table_param_list ')'
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_EXPRESSION, 4, $3, NULL, NULL, NULL);
+}
+;
+
+read_file_table_param_list:
+read_file_table_param
+{
+  $$ = $1;
+}
+| read_file_table_param_list ',' read_file_table_param
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, $3);
+}
+;
+
+read_file_table_param:
+literal
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_PARAM, 2, NULL, $1);
+}
+| NAME_OB NAMED_ARG literal
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_PARAM, 2, $1, $3);
 }
 ;
 
