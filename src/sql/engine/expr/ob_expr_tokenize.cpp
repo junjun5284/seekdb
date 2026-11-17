@@ -304,6 +304,18 @@ int ObExprTokenize::parse_fulltext(const ObExpr &expr, ObEvalCtx &ctx, TokenizeP
     if (fulltext_datum->is_null()) {
       // do nothing, return empty result
       param.fulltext_ = ObString::make_empty_string();
+    } else if (expr.args_[0]->obj_meta_.has_lob_header()
+               || ob_is_text_tc(expr.args_[0]->datum_meta_.type_)) {
+      // A TEXT/LONGTEXT argument is stored outside the row, read the whole
+      // value instead of handing the lob locator to the tokenizer.
+      if (OB_FAIL(ObTextStringHelper::read_real_string_data(
+              ctx.exec_ctx_,
+              param.allocator_,
+              *fulltext_datum,
+              expr.args_[0]->datum_meta_,
+              expr.args_[0]->obj_meta_.has_lob_header(),
+              param.fulltext_))) {
+      }
     } else {
       param.fulltext_ = fulltext_datum->get_string();
     }
