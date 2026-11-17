@@ -2466,6 +2466,26 @@ int ObDDLResolver::resolve_generated_column_attribute(ObColumnSchemaV2 &column,
     case T_INVISIBLE: {
       break;
     }
+    case T_ASYNCHRONOUS_COLUMN: {
+      // Problem 3: AI column marker.  The generated column must be STORED
+      // because we need to persist the AI-produced value once the background
+      // scheduler resolves it.  If the user omitted STORED/VIRTUAL, promote
+      // the column to STORED automatically so the syntax stays compact.
+      if (column.is_virtual_generated_column()) {
+        column.del_column_flag(VIRTUAL_GENERATED_COLUMN_FLAG);
+        column.add_column_flag(STORED_GENERATED_COLUMN_FLAG);
+        SQL_RESV_LOG(INFO, "promoted virtual column to STORED for AI column",
+                     K(column.get_column_name_str()));
+      } else if (!column.is_stored_generated_column()) {
+        // Neither STORED nor VIRTUAL was specified — auto-select STORED.
+        column.add_column_flag(STORED_GENERATED_COLUMN_FLAG);
+      }
+      column.add_column_flag(AI_COLUMN_FLAG);
+      resolve_stat.is_ai_column_ = true;
+      SQL_RESV_LOG(INFO, "column marked as AI column",
+                   K(column.get_column_name_str()));
+      break;
+    }
     default:  // won't be here
       ret = OB_ERR_PARSER_SYNTAX;
       SQL_RESV_LOG(WARN, "Wrong column attribute", K(ret), K(attr_node->type_));

@@ -4444,6 +4444,17 @@ int ObJsonTableDef::deep_copy(const ObJsonTableDef& src, ObIRawExprCopier &expr_
     } else if (OB_FAIL(namespace_arr_.push_back(ns_str))) {
     }
   }
+  if (OB_SUCC(ret)) {
+    file_format_ = src.file_format_;
+    skip_header_ = src.skip_header_;
+    has_header_ = src.has_header_;
+    if (OB_FAIL(ob_write_string(*allocator, src.file_path_, file_path_))) {
+    } else if (OB_FAIL(ob_write_string(*allocator, src.field_delimiter_, field_delimiter_))) {
+    } else if (OB_FAIL(ob_write_string(*allocator, src.line_delimiter_, line_delimiter_))) {
+    } else if (OB_FAIL(ob_write_string(*allocator, src.escape_char_, escape_char_))) {
+    } else if (OB_FAIL(ob_write_string(*allocator, src.enclosed_by_, enclosed_by_))) {
+    }
+  }
 
   return ret;
 }

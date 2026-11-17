@@ -47,6 +47,7 @@ enum MulModeTableType {
   OB_ORA_JSON_TABLE_TYPE, // 1
   OB_ORA_XML_TABLE_TYPE = 2,
   OB_UNNEST_TABLE_TYPE = 3,
+  OB_READ_FILE_TABLE_TYPE = 4,
 };
 
 typedef struct ObJtColBaseInfo
@@ -92,13 +93,30 @@ typedef struct ObJsonTableDef {
     : all_cols_(),
       doc_exprs_(),
       table_type_(MulModeTableType::INVALID_TABLE_TYPE),
-      namespace_arr_() {}
+      namespace_arr_(),
+      file_path_(),
+      file_format_(0),
+      field_delimiter_(),
+      line_delimiter_(),
+      escape_char_(),
+      enclosed_by_(),
+      skip_header_(0),
+      has_header_(true) {}
 
   int deep_copy(const ObJsonTableDef& src, ObIRawExprCopier &expr_copier, ObIAllocator* allocator);
   common::ObSEArray<ObJtColBaseInfo*, 4, common::ModulePageAllocator, true> all_cols_;
   common::ObSEArray<ObRawExpr*, 1, common::ModulePageAllocator, true> doc_exprs_;
   MulModeTableType table_type_;
   common::ObSEArray<ObString, 16, common::ModulePageAllocator, true> namespace_arr_;
+  // Fields used when table_type_ == OB_READ_FILE_TABLE_TYPE:
+  common::ObString file_path_;
+  int file_format_;           // cast from ObFileReadFormat
+  common::ObString field_delimiter_;
+  common::ObString line_delimiter_;
+  common::ObString escape_char_;
+  common::ObString enclosed_by_;
+  int64_t skip_header_;
+  bool has_header_;
 } ObJsonTableDef;
 
 struct ObValuesTableDef {
@@ -321,7 +339,8 @@ struct ColumnItem
        base_tid_(common::OB_INVALID_ID),
        base_cid_(common::OB_INVALID_ID),
        col_idx_(common::OB_INVALID_ID),
-       is_geo_(false)
+       is_geo_(false),
+       is_ai_column_(false)
   {}
   bool is_invalid() const { return NULL == expr_; }
   const ObColumnRefRawExpr *get_expr() const { return expr_; }
@@ -351,6 +370,7 @@ struct ColumnItem
     default_empty_expr_ = NULL;
     default_value_expr_ = NULL;
     is_geo_ = false;
+    is_ai_column_ = false;
   }
   void set_ref_id(uint64_t table_id, uint64_t column_id)
   {
@@ -391,6 +411,11 @@ struct ColumnItem
   uint64_t base_cid_;
   uint64_t col_idx_;
   bool is_geo_;
+  // Problem 3: true when this column is an AI-column — a STORED generated
+  // column whose expression references an AI function.  The executor should
+  // NOT evaluate the expression synchronously; instead it must write a NULL
+  // placeholder and hand the row off to the background scheduler.
+  bool is_ai_column_;
 };
 
 inline uint64_t ColumnItem::hash(uint64_t seed) const

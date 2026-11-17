@@ -2279,6 +2279,24 @@ int ObLogPlan::allocate_json_table_path(JsonTablePath *json_table_path,
     } else if (OB_FAIL(op->set_column_param_default_arr(json_table_path->column_param_default_exprs_))) {
     } else {
       op->set_table_type(tbl_def->table_type_);
+      // When this is a read-file table, copy the file-access fields so that
+      // the code generator can build an ObReadFileTableSpec.
+      if (MulModeTableType::OB_READ_FILE_TABLE_TYPE == tbl_def->table_type_) {
+        op->get_read_file_format() = tbl_def->file_format_;
+        op->get_read_skip_header() = tbl_def->skip_header_;
+        op->get_read_has_header() = tbl_def->has_header_;
+        if (OB_FAIL(ob_write_string(get_allocator(), tbl_def->file_path_,
+                                     op->get_read_file_path()))) {
+        } else if (OB_FAIL(ob_write_string(get_allocator(), tbl_def->field_delimiter_,
+                                            op->get_read_field_delimiter()))) {
+        } else if (OB_FAIL(ob_write_string(get_allocator(), tbl_def->line_delimiter_,
+                                            op->get_read_line_delimiter()))) {
+        } else if (OB_FAIL(ob_write_string(get_allocator(), tbl_def->escape_char_,
+                                            op->get_read_escape_char()))) {
+        } else if (OB_FAIL(ob_write_string(get_allocator(), tbl_def->enclosed_by_,
+                                            op->get_read_enclosed_by()))) {
+        }
+      }
       out_access_path_op = op;
     }
   }

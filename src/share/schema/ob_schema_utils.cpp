@@ -77,6 +77,11 @@ bool ObSchemaUtils::is_stored_generated_column(uint64_t flag)
   return flag & STORED_GENERATED_COLUMN_FLAG;
 }
 
+bool ObSchemaUtils::is_ai_column(uint64_t flag)
+{
+  return flag & AI_COLUMN_FLAG;
+}
+
 bool ObSchemaUtils::is_cte_generated_column(uint64_t flag)
 {
   return flag & CTE_GENERATED_COLUMN_FLAG;
