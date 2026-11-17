@@ -18,6 +18,7 @@
 #define _OCEANBASE_STORAGE_FTS_OB_IK_FT_PARSER_H_
 
 #include "lib/allocator/ob_allocator.h"
+#include "lib/allocator/page_arena.h"
 #include "storage/fts/dict/ob_ft_cache_container.h"
 #include "storage/fts/dict/ob_ft_dict.h"
 #include "storage/fts/dict/ob_ft_dict_def.h"
@@ -31,6 +32,48 @@ namespace storage
 {
 class ObFTDictHub;
 
+// The IK dictionaries are read only once the cache has been built, so a thread
+// keeps the three dictionaries alive and every parser of the thread points to
+// them instead of rebuilding the range wrappers for each document.
+class ObIKDictCache
+{
+public:
+  ~ObIKDictCache() = default;
+
+  static ObIKDictCache &get_instance();
+
+  int get_dicts(ObIFTDict *&main_dict, ObIFTDict *&quan_dict, ObIFTDict *&stop_dict);
+
+private:
+  ObIKDictCache()
+      : alloc_(),
+        cache_main_(alloc_),
+        cache_quan_(alloc_),
+        cache_stop_(alloc_),
+        dict_main_(nullptr),
+        dict_quan_(nullptr),
+        dict_stop_(nullptr),
+        is_inited_(false)
+  {
+  }
+
+  int load_dict(const ObFTDictDesc &desc,
+                ObFTCacheRangeContainer &container,
+                ObIFTDict *&dict);
+
+private:
+  ObArenaAllocator alloc_;
+  ObFTCacheRangeContainer cache_main_;
+  ObFTCacheRangeContainer cache_quan_;
+  ObFTCacheRangeContainer cache_stop_;
+  ObIFTDict *dict_main_;
+  ObIFTDict *dict_quan_;
+  ObIFTDict *dict_stop_;
+  bool is_inited_;
+
+  DISABLE_COPY_ASSIGN(ObIKDictCache);
+};
+
 class ObIKFTParser final : public ObITokenIterator
 {
 public:
@@ -41,9 +84,6 @@ public:
         ctx_(nullptr),
         hub_(hub),
         segmenters_(allocator_),
-        cache_main_(allocator),
-        cache_quan_(allocator),
-        cache_stop_(allocator),
         dict_main_(nullptr),
         dict_quan_(nullptr),
         dict_stop_(nullptr)
@@ -74,8 +114,6 @@ private:
 private:
   int init_dict(const ObFTParserParam &param);
 
-  int init_single_dict(ObFTDictDesc desc, ObFTCacheRangeContainer &container);
-
   int init_segmenter(const ObFTParserParam &param);
 
   int init_ctx(const ObFTParserParam &param);
@@ -83,10 +121,6 @@ private:
   void reset();
 
   bool should_read_newest_table() const;
-
-  int build_dict_from_cache(const ObFTDictDesc &desc,
-                            ObFTCacheRangeContainer &container,
-                            ObIFTDict *&dict);
 
 private:
   static constexpr int SEGMENT_LIMIT = 1000;
@@ -98,11 +132,7 @@ private:
   ObFTDictHub *hub_;
   ObList<ObIIKProcessor *, ObIAllocator> segmenters_;
 
-  // For now there's no change of dict in one query, so we can pin dict this level.
-  ObFTCacheRangeContainer cache_main_;
-  ObFTCacheRangeContainer cache_quan_;
-  ObFTCacheRangeContainer cache_stop_;
-
+  // The dictionaries are owned by the thread wide ObIKDictCache.
   ObIFTDict *dict_main_;
   ObIFTDict *dict_quan_;
   ObIFTDict *dict_stop_;
