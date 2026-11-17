@@ -124,7 +124,9 @@ ObAddWord::ObAddWord(
     stopword_cnt_(0),
     min_token_size_(property.min_token_size_),
     max_token_size_(property.max_token_size_),
-    flag_(flag)
+    flag_(flag),
+    case_buf_(nullptr),
+    case_buf_size_(0)
 {
 }
 
@@ -164,18 +166,60 @@ int ObAddWord::casedown_word(const ObFTWord &src, ObFTWord &dst)
   if (OB_UNLIKELY(src.empty())) {
     ret = OB_INVALID_ARGUMENT;
   } else if (flag_.casedown()) {
-    ObString dst_str;
-    if (OB_FAIL(ObCharset::tolower(
-                    word_meta_.get_collation_type(),
-                    src.get_word().get_string(),
-                    dst_str,
-                    allocator_))) {
+    const ObCharsetInfo *cs_info = ObCharset::get_charset(word_meta_.get_collation_type());
+    ObString src_str = src.get_word().get_string();
+    if (OB_ISNULL(cs_info)) {
+      ret = OB_INVALID_ARGUMENT;
+    } else if (1 != cs_info->casedn_multiply) {
+      // The lower case form is longer, copy it like before.
+      ObString dst_str;
+      if (OB_FAIL(ObCharset::tolower(word_meta_.get_collation_type(), src_str, dst_str,
+                                     allocator_))) {
+      } else {
+        ObFTWord tmp(dst_str.length(), dst_str.ptr(), word_meta_);
+        dst = tmp;
+      }
+    } else if (OB_FAIL(ensure_case_buf(src_str.length()))) {
     } else {
-      ObFTWord tmp(dst_str.length(), dst_str.ptr(), word_meta_);
-      dst = tmp;
+      // Convert into a scratch buffer first: most words (CJK, digits, lower
+      // case letters) are unchanged and can keep pointing at the input text,
+      // a copy per word would dominate the tokenizer.
+      size_t case_len = cs_info->cset->casedn(cs_info,
+                                              const_cast<char *>(src_str.ptr()),
+                                              src_str.length(),
+                                              case_buf_,
+                                              case_buf_size_);
+      if (case_len == static_cast<size_t>(src_str.length())
+          && 0 == MEMCMP(case_buf_, src_str.ptr(), case_len)) {
+        dst = src;
+      } else {
+        ObString dst_str;
+        if (OB_FAIL(ob_write_string(allocator_, ObString(case_len, case_buf_), dst_str))) {
+        } else {
+          ObFTWord tmp(dst_str.length(), dst_str.ptr(), word_meta_);
+          dst = tmp;
+        }
+      }
     }
   } else {
     dst = src;
+  }
+  return ret;
+}
+
+int ObAddWord::ensure_case_buf(const int64_t size)
+{
+  int ret = OB_SUCCESS;
+  if (size <= case_buf_size_) {
+    // reuse
+  } else {
+    char *buf = static_cast<char *>(allocator_.alloc(size));
+    if (OB_ISNULL(buf)) {
+      ret = OB_ALLOCATE_MEMORY_FAILED;
+    } else {
+      case_buf_ = buf;
+      case_buf_size_ = size;
+    }
   }
   return ret;
 }
