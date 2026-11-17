@@ -123,6 +123,7 @@ private:
   int casedown_word(const ObFTWord &src, ObFTWord &dst);
   int check_stopword(const ObFTWord &word, bool &is_stopword);
   int groupby_word(const ObFTWord &word, const int64_t word_cnt);
+  int ensure_case_buf(const int64_t size);
 private:
   ObObjMeta word_meta_;
   common::ObIAllocator &allocator_;
@@ -133,6 +134,10 @@ private:
   int64_t min_token_size_;
   int64_t max_token_size_;
   ObAddWordFlag flag_;
+  // Scratch space for the case conversion, tokens whose lower case form equals
+  // the original text reuse the original buffer instead of a copy.
+  char *case_buf_;
+  int64_t case_buf_size_;
 };
 
 } // end namespace storage
