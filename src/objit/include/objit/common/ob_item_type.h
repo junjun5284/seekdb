@@ -2274,6 +2274,12 @@ typedef enum ObItemType
   T_FORK_DATABASE = 4917,
   T_DIFF_TABLE = 4918,
   T_MERGE_TABLE = 4919,
+  T_READ_FILE_TABLE_EXPRESSION = 4921,
+  T_READ_FILE_TABLE_PARAM = 4922,
+  // Problem 3: marks a stored generated column whose evaluation is deferred
+  // to the background AI column scheduler.  Used inside
+  // opt_generated_column_attribute_list.
+  T_ASYNCHRONOUS_COLUMN = 4923,
   T_MAX //Attention: add a new type before T_MAX
 } ObItemType;
 

@@ -69,6 +69,7 @@ public:
   static int deep_copy_schema(char *buf, const T &old_var, T *&new_var);
   static bool is_virtual_generated_column(uint64_t flag);
   static bool is_stored_generated_column(uint64_t flag);
+  static bool is_ai_column(uint64_t flag);
   static bool is_cte_generated_column(uint64_t flag);
   static bool is_default_expr_v2_column(uint64_t flag);
   static bool is_vec_index_column(const uint64_t flag);

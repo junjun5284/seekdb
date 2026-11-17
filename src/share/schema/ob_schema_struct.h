@@ -106,6 +106,11 @@ static const uint64_t OB_MIN_ID  = 0;//used for lower_bound
 #define RESERVED_COLUMN_FLAG_4 (INT64_C(1) << 4)
 #define RESERVED_COLUMN_FLAG_5 (INT64_C(1) << 5)
 #define INVISIBLE_COLUMN_FLAG (INT64_C(1) << 6)
+// Problem 3: AI column — a stored generated column whose expression calls
+// an AI function (ai_complete / ai_embed / ai_prompt / ai_rerank).  INSERTs
+// and UPDATEs do not block on AI evaluation; instead the write is followed
+// by a background scheduler task that calls the model and updates the row.
+#define AI_COLUMN_FLAG (INT64_C(1) << 7)
 // The logic of the new table without a primary key changes the column (partition key) to the primary key
 #define HEAP_ALTER_ROWKEY_FLAG (INT64_C(1) << 8)
 #define HEAP_TABLE_SORT_ROWKEY_FLAG (INT64_C(1) << 12) // 1:sortkey in new no pk table

@@ -33,7 +33,15 @@ public:
         access_exprs_(),
         all_cols_def_(),
         table_type_(MulModeTableType::INVALID_TABLE_TYPE),
-        namespace_arr_() {}
+        namespace_arr_(),
+        read_file_path_(),
+        read_file_format_(0),
+        read_field_delimiter_(),
+        read_line_delimiter_(),
+        read_escape_char_(),
+        read_enclosed_by_(),
+        read_skip_header_(0),
+        read_has_header_(true) {}
 
   virtual ~ObLogJsonTable() {}
   int add_values_expr(ObIArray<ObRawExpr*> &exprs) { return append(value_exprs_, exprs); }
@@ -62,6 +70,19 @@ public:
   int64_t get_column_param_default_size() { return column_param_default_exprs_.count(); }
   int set_column_param_default_arr(ObIArray<ObColumnDefault> &column_param_default_exprs);
   ObColumnDefault* get_column_param_default_val(int64_t index);
+
+  // --- Fields for OB_READ_FILE_TABLE_TYPE ---
+  common::ObString &get_read_file_path() { return read_file_path_; }
+  const common::ObString &get_read_file_path() const { return read_file_path_; }
+  int &get_read_file_format() { return read_file_format_; }
+  const int &get_read_file_format() const { return read_file_format_; }
+  common::ObString &get_read_field_delimiter() { return read_field_delimiter_; }
+  common::ObString &get_read_line_delimiter() { return read_line_delimiter_; }
+  common::ObString &get_read_escape_char() { return read_escape_char_; }
+  common::ObString &get_read_enclosed_by() { return read_enclosed_by_; }
+  int64_t &get_read_skip_header() { return read_skip_header_; }
+  bool &get_read_has_header() { return read_has_header_; }
+
 private:
   uint64_t table_id_;
   common::ObSEArray<ObRawExpr*, 1, common::ModulePageAllocator, true> value_exprs_;
@@ -75,6 +96,16 @@ private:
   common::ObSEArray<ObString, 16, common::ModulePageAllocator, true> namespace_arr_;
   // default value array
   common::ObSEArray<ObColumnDefault, 1, common::ModulePageAllocator, true> column_param_default_exprs_;
+
+  // file-table fields, valid when table_type_ == OB_READ_FILE_TABLE_TYPE
+  common::ObString read_file_path_;
+  int read_file_format_;
+  common::ObString read_field_delimiter_;
+  common::ObString read_line_delimiter_;
+  common::ObString read_escape_char_;
+  common::ObString read_enclosed_by_;
+  int64_t read_skip_header_;
+  bool read_has_header_;
 
   DISALLOW_COPY_AND_ASSIGN(ObLogJsonTable);
 };
