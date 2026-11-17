@@ -423,3 +423,16 @@ cc_library(
     tags = ["manual"],
     visibility = ["//src/observer:__pkg__"],
 )
+
+# Unit tests compile against SQL's internal headers. The test runtime resolves
+# the implementation through the observer library.
+cc_library(
+    name = "sql_unit_test_internal_headers",
+    testonly = True,
+    deps = [
+        ":sql_runtime_internal_headers",
+        "//src/share:json_access",
+    ],
+    tags = ["manual"],
+    visibility = ["//unittest/sql:__subpackages__"],
+)
