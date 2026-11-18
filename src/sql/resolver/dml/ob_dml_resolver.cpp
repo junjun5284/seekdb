@@ -3992,7 +3992,8 @@ int ObDMLResolver::resolve_read_file_item(const ParseNode &parse_tree, TableItem
         common::ObSEArray<ObString, 32> files;
         OZ (ObFileReadUtils::expand_glob(resolved_path, *allocator_, files));
         ObFileColumnDef path_col;
-        path_col.name_.assign_ptr("pathname", strlen("pathname"));
+        // glob() exposes exactly one column, named "file".
+        path_col.name_.assign_ptr("file", strlen("file"));
         path_col.data_type_.set_obj_type(ObVarcharType);
         path_col.data_type_.set_length(ObAccuracy::DDL_DEFAULT_ACCURACY[ObVarcharType].get_length());
         path_col.data_type_.set_charset_type(
