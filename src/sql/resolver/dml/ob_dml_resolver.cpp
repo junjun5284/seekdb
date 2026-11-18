@@ -3833,6 +3833,7 @@ inline common::ObString node_str(const ParseNode *n)
 int ObDMLResolver::resolve_read_file_item(const ParseNode &parse_tree, TableItem *&table_item)
 {
   INIT_SUCC(ret);
+  bool enable_file_sql = false;
   ObDMLStmt *stmt = get_stmt();
   TableItem *item = NULL;
   ObJsonTableDef *table_def = NULL;
@@ -3854,8 +3855,13 @@ int ObDMLResolver::resolve_read_file_item(const ParseNode &parse_tree, TableItem
   common::ObSEArray<const ParseNode*, 8> params;
   common::ObSEArray<ObFileColumnDef, 32> inferred_columns;
 
-  // --- 1. Validate parse node shape ---
-  if (T_READ_FILE_TABLE_EXPRESSION != parse_tree.type_ || 4 != parse_tree.num_child_) {
+  // --- 0. Reading local files as tables requires an explicit opt-in ---
+  if (OB_FAIL(session_info_->is_file_sql_enabled(enable_file_sql))) {
+    LOG_WARN("fail to get enable_file_sql", K(ret));
+  } else if (!enable_file_sql) {
+    ret = OB_NOT_SUPPORTED;
+    LOG_USER_ERROR(OB_NOT_SUPPORTED, "reading local files as tables when 'enable_file_sql' is off");
+  } else if (T_READ_FILE_TABLE_EXPRESSION != parse_tree.type_ || 4 != parse_tree.num_child_) {
     ret = OB_ERR_UNEXPECTED;
     LOG_WARN("unexpected parse tree for read_file_table",
              K(parse_tree.type_), K(parse_tree.num_child_));
@@ -3922,9 +3928,32 @@ int ObDMLResolver::resolve_read_file_item(const ParseNode &parse_tree, TableItem
         has_header = (value.length() > 0 &&
                       (value.ptr()[0] == '1' || value.ptr()[0] == 't' ||
                        value.ptr()[0] == 'T'));
+      } else if (0 == name.case_compare("FORMAT")) {
+        // read_json(format = 'newline_delimited') is the JSON-lines variant.
+        if (0 == value.case_compare("newline_delimited")
+            || 0 == value.case_compare("ndjson")) {
+          file_format = ObFileReadFormat::NDJSON;
+        } else if (0 == value.case_compare("json")) {
+          file_format = ObFileReadFormat::JSON;
+        } else if (0 == value.case_compare("csv")) {
+          file_format = ObFileReadFormat::CSV;
+        } else {
+          ret = OB_NOT_SUPPORTED;
+          LOG_USER_ERROR(OB_NOT_SUPPORTED, "read file format option");
+        }
+      } else if (0 == name.case_compare("SAMPLE_SIZE")) {
+        // Only a full scan (-1) is supported: the schema inference always reads
+        // the whole file so that the exposed column types stay stable.
+        int64_t sample_size = ob_strntoll(value.ptr(), value.length(), 10, NULL, &ret);
+        if (OB_FAIL(ret)) {
+          ret = OB_ERR_PARSER_SYNTAX;
+        } else if (-1 != sample_size) {
+          ret = OB_NOT_SUPPORTED;
+          LOG_USER_ERROR(OB_NOT_SUPPORTED, "read file sample_size other than -1");
+        }
       } else {
-        // Unknown named option is ignored (forward-compat).
-        LOG_INFO("ignore unknown read-file option", K(name), K(value));
+        ret = OB_NOT_SUPPORTED;
+        LOG_USER_ERROR(OB_NOT_SUPPORTED, "unknown read file option");
       }
     }
   }

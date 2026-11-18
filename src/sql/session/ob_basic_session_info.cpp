@@ -3029,6 +3029,11 @@ int ObBasicSessionInfo::is_push_join_predicate_enabled(bool &push_join_predicate
   return get_bool_sys_var(SYS_VAR__PUSH_JOIN_PREDICATE, push_join_predicate_enabled);
 }
 
+int ObBasicSessionInfo::is_file_sql_enabled(bool &file_sql_enabled) const
+{
+  return get_bool_sys_var(SYS_VAR_ENABLE_FILE_SQL, file_sql_enabled);
+}
+
 int ObBasicSessionInfo::get_ob_sparse_drop_ratio_search(uint64_t &ob_sparse_drop_ratio_search) const
 {
   return get_uint64_sys_var(SYS_VAR_OB_SPARSE_DROP_RATIO_SEARCH, ob_sparse_drop_ratio_search);
