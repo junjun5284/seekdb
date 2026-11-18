@@ -111,6 +111,7 @@ int ObReadFileTableOp::open_file()
                                                        spec_->enclosed_by_,
                                                        spec_->skip_header_,
                                                        csv_format_))) {
+  } else if (OB_FALSE_IT(csv_format_.file_column_nums_ = spec_->column_exprs_.count())) {
   } else if (OB_FAIL(csv_parser_.init(csv_format_))) {
   }
   return ret;
@@ -155,7 +156,9 @@ int ObReadFileTableOp::parse_csv_row()
   int ret = OB_SUCCESS;
   const char *str = file_buffer_.string().ptr() + buffer_offset_;
   const char *end = file_buffer_.string().ptr() + buffer_size_;
-  int64_t nrows = 0;
+  // scan() treats nrows as the maximum number of rows to consume, so it must
+  // be positive; this function parses exactly one row per call.
+  int64_t nrows = 1;
   ObSEArray<ObCSVGeneralParser::LineErrRec, 16> errors;
   struct RowHandler
   {

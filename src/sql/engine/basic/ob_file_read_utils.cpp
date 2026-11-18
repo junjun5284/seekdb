@@ -384,13 +384,36 @@ int ObFileReadUtils::read_csv_header(ObIAllocator &allocator,
   } else {
     ObCSVGeneralFormat format;
     ObCSVGeneralParser parser;
-    if (OB_FAIL(build_csv_format(allocator, ObString(","), ObString("\n"),
-                                  ObString("\\"), ObString("\""), 0, format))) {
-    } else if (OB_FAIL(parser.init(format))) {
+    // split_lines() hands back the line without its terminator, but the CSV
+    // parser only closes (and therefore emits) a row when it sees the line
+    // delimiter, so the header row is scanned from a copy with the trailing
+    // newline restored.
+    const int64_t header_len = lines.at(0).length();
+    char *header_buf = static_cast<char *>(allocator.alloc(header_len + 1));
+    if (OB_ISNULL(header_buf)) {
+      ret = OB_ALLOCATE_MEMORY_FAILED;
+    } else if (OB_FAIL(build_csv_format(allocator, ObString(","), ObString("\n"),
+                                        ObString("\\"), ObString("\""), 0, format))) {
     } else {
-      const char *str = lines.at(0).ptr();
-      const char *end = str + lines.at(0).length();
-      int64_t nrows = 0;
+      if (header_len > 0) {
+        MEMCPY(header_buf, lines.at(0).ptr(), header_len);
+      }
+      header_buf[header_len] = '\n';
+      // The parser pre-allocates one field slot per column, so the column count
+      // has to be known before init(); the header row itself defines it.
+      const char field_term = format.field_term_str_.empty() ? '\0' : format.field_term_str_[0];
+      int64_t field_cnt = 1;
+      for (int64_t i = 0; i < header_len; i++) {
+        if ('\0' != field_term && header_buf[i] == field_term) {
+          ++field_cnt;
+        }
+      }
+      format.file_column_nums_ = field_cnt;
+      const char *str = header_buf;
+      const char *end = header_buf + header_len + 1;
+      // scan() takes the maximum number of rows to consume, so it must be
+      // positive or the header row is never parsed.
+      int64_t nrows = 1;
       ObSEArray<ObCSVGeneralParser::LineErrRec, 16> errors;
       // The fields of the header row are collected by the handler.
       struct HeaderHandler
@@ -418,7 +441,8 @@ int ObFileReadUtils::read_csv_header(ObIAllocator &allocator,
           return (*this)(one_line);
         }
       } handler{header_fields};
-      if (OB_FAIL(parser.scan(str, end, nrows, nullptr, nullptr, handler, errors))) {
+      if (OB_FAIL(parser.init(format))) {
+      } else if (OB_FAIL(parser.scan(str, end, nrows, nullptr, nullptr, handler, errors))) {
         ret = OB_INVALID_DATA;
         LOG_USER_ERROR(OB_INVALID_DATA, "the header of the csv file is malformed");
       }
