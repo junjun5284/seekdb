@@ -462,7 +462,18 @@ int ObFileReadUtils::infer_csv_schema(const ObString &file_path,
     ObArray<ObString> header_fields;
     if (OB_FAIL(read_csv_header(allocator, content, header_fields))) {
     } else {
+      // The same header name may appear many times, the repeated ones get a
+      // positional suffix (id, id__2, id__3, ...) so that the columns stay
+      // addressable.
+      ObArray<int64_t> name_seen_counts;
       for (int64_t i = 0; OB_SUCC(ret) && i < header_fields.count(); i++) {
+        int64_t seen = 0;
+        for (int64_t j = 0; OB_SUCC(ret) && j < name_seen_counts.count(); j++) {
+          if (0 == header_fields.at(i).case_compare(columns.at(j).name_)) {
+            ++name_seen_counts.at(j);
+            seen = name_seen_counts.at(j);
+          }
+        }
         ObFileColumnDef col;
         ObString name = header_fields.at(i);
         if (name.empty()) {
@@ -471,14 +482,111 @@ int ObFileReadUtils::infer_csv_schema(const ObString &file_path,
           int64_t name_len = snprintf(name_buf, sizeof(name_buf), "column:%ld", i);
           if (name_len > 0 && static_cast<int64_t>(sizeof(name_buf)) > name_len) {
             if (OB_FAIL(ob_write_string(allocator, ObString(name_len, name_buf), name))) {
-              break;
+            }
+          }
+        } else if (seen > 0) {
+          char name_buf[OB_MAX_COLUMN_NAME_LENGTH + 32];
+          int64_t name_len = snprintf(name_buf, sizeof(name_buf), "%.*s__%ld",
+                                      header_fields.at(i).length(), header_fields.at(i).ptr(),
+                                      seen + 1);
+          if (name_len > 0 && static_cast<int64_t>(sizeof(name_buf)) > name_len) {
+            if (OB_FAIL(ob_write_string(allocator, ObString(name_len, name_buf), name))) {
             }
           }
         }
-        col.name_ = name;
-        set_data_type(col.data_type_, ObVarcharType);
-        if (OB_SUCC(ret) && OB_FAIL(columns.push_back(col))) {
-          break;
+        if (OB_FAIL(ret)) {
+        } else if (OB_FAIL(name_seen_counts.push_back(0))) {
+        } else {
+          col.name_ = name;
+          set_data_type(col.data_type_, ObVarcharType);
+          if (OB_FAIL(columns.push_back(col))) {
+          }
+        }
+      }
+      // The types are inferred from the data rows, the header row only names
+      // the columns.
+      if (OB_SUCC(ret) && columns.count() > 0) {
+        ObArray<ObColumnTypeAccumulator> accumulators;
+        for (int64_t i = 0; OB_SUCC(ret) && i < columns.count(); i++) {
+          ObColumnTypeAccumulator acc;
+          if (OB_FAIL(accumulators.push_back(acc))) {
+          }
+        }
+        ObCSVGeneralFormat format;
+        ObCSVGeneralParser parser;
+        char *data_buf = static_cast<char *>(allocator.alloc(content.length() + 1));
+        if (OB_FAIL(ret)) {
+        } else if (OB_ISNULL(data_buf)) {
+          ret = OB_ALLOCATE_MEMORY_FAILED;
+        } else if (OB_FAIL(build_csv_format(allocator, ObString(","), ObString("\n"),
+                                            ObString("\\"), ObString("\""), 0, format))) {
+        } else {
+          MEMCPY(data_buf, content.ptr(), content.length());
+          data_buf[content.length()] = '\n';
+          format.file_column_nums_ = columns.count();
+          struct TypeHandler
+          {
+            ObIArray<ObColumnTypeAccumulator> &accs_;
+            bool first_line_;
+            int operator()(ObCSVGeneralParser::HandleOneLineParam param)
+            {
+              int ret = OB_SUCCESS;
+              if (first_line_) {
+                // the header row holds the column names
+                first_line_ = false;
+              } else {
+                first_line_ = false;
+                const int64_t count = MIN(param.field_cnt_, accs_.count());
+                for (int64_t i = 0; i < count; i++) {
+                  const ObCSVGeneralParser::FieldValue &field = param.fields_.at(i);
+                  ObString text;
+                  if (!field.is_null_) {
+                    text.assign_ptr(field.ptr_, field.len_);
+                  }
+                  bool is_null = field.is_null_ || text.empty();
+                  ObDataType value_type = ObFileReadUtils::infer_value_type(text, is_null);
+                  ObColumnTypeAccumulator &acc = accs_.at(i);
+                  if (is_null) {
+                    acc.seen_null_ = true;
+                  } else if (ObIntType == value_type.get_obj_type()) {
+                    acc.seen_int_ = true;
+                  } else if (ObDoubleType == value_type.get_obj_type()) {
+                    acc.seen_double_ = true;
+                  } else if (ObDateType == value_type.get_obj_type()) {
+                    acc.seen_date_ = true;
+                  } else if (ObDateTimeType == value_type.get_obj_type()) {
+                    acc.seen_datetime_ = true;
+                  } else if (ObTinyIntType == value_type.get_obj_type()) {
+                    acc.seen_bool_ = true;
+                  } else {
+                    acc.seen_string_ = true;
+                  }
+                }
+              }
+              return ret;
+            }
+            int operator()(ObCSVGeneralParser::HandleBatchLinesParam param)
+            {
+              ObCSVGeneralParser::HandleOneLineParam one_line(param.fields_, param.field_cnt_);
+              return (*this)(one_line);
+            }
+          } handler{accumulators, true};
+          if (OB_FAIL(parser.init(format))) {
+          } else {
+            const char *str = data_buf;
+            const char *end = data_buf + content.length() + 1;
+            int64_t nrows = INT64_MAX;
+            ObSEArray<ObCSVGeneralParser::LineErrRec, 16> errors;
+            if (OB_FAIL(parser.scan(str, end, nrows, nullptr, nullptr, handler, errors, true))) {
+              // A malformed data row does not change the schema.
+              LOG_WARN("failed to scan the csv data rows", K(ret));
+              ret = OB_SUCCESS;
+            }
+          }
+        }
+        for (int64_t i = 0; OB_SUCC(ret) && i < columns.count(); i++) {
+          const ObObjType type = resolve_column_type(accumulators.at(i));
+          set_data_type(columns.at(i).data_type_, type);
         }
       }
     }

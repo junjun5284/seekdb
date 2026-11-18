@@ -17,6 +17,7 @@
 #define USING_LOG_PREFIX SQL_ENG
 #include "ob_read_file_table_op.h"
 #include "common/json_type/ob_json_parse.h"
+#include "share/object/ob_obj_cast.h"
 #include "lib/utility/utility.h"
 
 namespace oceanbase
@@ -288,11 +289,32 @@ int ObReadFileTableOp::set_column_datum(const int64_t col_idx, const ObString &v
   } else {
     ObExpr *expr = spec_->column_exprs_.at(col_idx);
     ObDatum &datum = expr->locate_datum_for_write(eval_ctx_);
+    const ObObjType target_type = expr->datum_meta_.type_;
     if (value.empty()) {
       // An empty field is a null value.
       datum.set_null();
-    } else {
+    } else if (ob_is_string_type(target_type) || ob_is_json(target_type)) {
       datum.set_string(value);
+    } else if (ObTinyIntType == target_type
+               && (0 == value.case_compare("true") || 0 == value.case_compare("false"))) {
+      // A boolean column holds the literal words true/false in the file.
+      datum.set_int(0 == value.case_compare("true") ? 1 : 0);
+    } else {
+      // The inferred column type is not a string: the text is converted with
+      // the regular cast rules (integers, doubles, dates, ...).
+      ObObj in_obj;
+      ObObj out_obj;
+      in_obj.set_varchar(value);
+      in_obj.set_collation_type(CS_TYPE_UTF8MB4_BIN);
+      in_obj.set_collation_level(CS_LEVEL_COERCIBLE);
+      ObCastCtx cast_ctx(&ctx_.get_allocator(), NULL, 0, CM_NONE,
+                         expr->datum_meta_.cs_type_);
+      if (OB_FAIL(ObObjCaster::to_type(target_type, cast_ctx, in_obj, out_obj))) {
+        LOG_WARN("failed to convert a file value", K(ret), K(col_idx), K(target_type),
+                 K(value));
+      } else {
+        datum.from_obj(out_obj);
+      }
     }
   }
   return ret;

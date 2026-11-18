@@ -638,6 +638,10 @@ int ObSqlParameterization::transform_tree(TransformTreeCtx &ctx,
         ctx.sql_info_->ps_need_parameterized_ = false;
       } else if (T_INTO_OUTFILE == ctx.tree_->type_) {
         ctx.sql_info_->ps_need_parameterized_ = false;
+      } else if (T_READ_FILE_TABLE_EXPRESSION == ctx.tree_->type_) {
+        // The file path decides the schema of the table, so the statement must
+        // keep its literals: two different files may not share one plan.
+        ctx.sql_info_->ps_need_parameterized_ = false;
       }
     }
     // Determine which level of the tree the values() in insert are at, when a node's value_father_level_ is at VALUE_VECTOR_LEVEL,

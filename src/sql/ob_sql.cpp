@@ -2365,6 +2365,18 @@ int ObSql::generate_plan(ParseResult &parse_result,
     } else {
       if (NULL != pc_ctx) {
         pc_ctx->should_add_plan_ = true;
+        // A read-file table exposes the schema inferred from its file, so a plan
+        // built for one file must never be reused for another one.
+        for (int64_t i = 0; OB_SUCC(ret) && i < stmt->get_table_items().count(); ++i) {
+          const TableItem *table_item = stmt->get_table_item(i);
+          if (OB_NOT_NULL(table_item)
+              && table_item->is_json_table()
+              && OB_NOT_NULL(table_item->json_table_def_)
+              && MulModeTableType::OB_READ_FILE_TABLE_TYPE == table_item->json_table_def_->table_type_) {
+            pc_ctx->should_add_plan_ = false;
+            break;
+          }
+        }
       }
     }
 
