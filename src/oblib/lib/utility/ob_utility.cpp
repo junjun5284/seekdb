@@ -24,14 +24,16 @@
 #include <BaseTsd.h>
 typedef SSIZE_T ssize_t;
 static inline ssize_t ob_pwrite(int fd, const void *buf, size_t count, int64_t offset) {
-  HANDLE h = (HANDLE)_get_osfhandle(fd);
-  if (h == INVALID_HANDLE_VALUE) { errno = EBADF; return -1; }
-  OVERLAPPED ov = {};
-  ov.Offset = (DWORD)(offset & 0xFFFFFFFF);
-  ov.OffsetHigh = (DWORD)(offset >> 32);
-  DWORD written = 0;
-  if (!WriteFile(h, buf, (DWORD)count, &written, &ov)) { return -1; }
-  return (ssize_t)written;
+  // Same reasoning as ob_pread below: the CRT descriptor is a synchronous
+  // handle, so position the file pointer explicitly instead of using
+  // WriteFile() with an OVERLAPPED structure.
+  ssize_t write_ret = -1;
+  if (0 <= offset && 0 < count) {
+    if (offset == _lseeki64(fd, offset, SEEK_SET)) {
+      write_ret = _write(fd, buf, (unsigned int)count);
+    }
+  }
+  return write_ret;
 }
 static inline ssize_t ob_pread(int fd, void *buf, size_t count, int64_t offset) {
   // The descriptor comes from the CRT ::open(), i.e. a synchronous handle.
