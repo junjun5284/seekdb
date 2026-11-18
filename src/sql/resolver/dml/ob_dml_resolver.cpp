@@ -3970,6 +3970,9 @@ int ObDMLResolver::resolve_read_file_item(const ParseNode &parse_tree, TableItem
   } else if (OB_FAIL(ObFileReadUtils::check_and_resolve_path(secure_file_priv, file_path,
                                                               *allocator_, resolved_path))) {
     LOG_WARN("check secure path failed", K(file_path), K(ret));
+  } else if (has_header && 0 == skip_header) {
+    // The first row holds the column names, it is not a data row.
+    skip_header = 1;
   }
 
   // --- 5. Schema inference ---

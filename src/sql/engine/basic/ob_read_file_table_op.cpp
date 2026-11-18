@@ -194,7 +194,44 @@ int ObReadFileTableOp::parse_csv_row()
   } else {
     // The parser consumed the row, the offset moves past it.
     buffer_offset_ = str - file_buffer_.string().ptr();
-    batch_row_count_ = row_values_.count();
+    // row_values_ holds the fields of exactly one parsed row.
+    batch_row_count_ = 1;
+    row_index_ = 0;
+  }
+  return ret;
+}
+
+// Parses the next json line of the buffer into the fields of the current row.
+int ObReadFileTableOp::parse_next_json_row()
+{
+  int ret = OB_SUCCESS;
+  bool parsed = false;
+  const char *base = file_buffer_.string().ptr();
+  const char *end = base + buffer_size_;
+  while (OB_SUCC(ret) && !parsed && buffer_offset_ < buffer_size_) {
+    const char *str = base + buffer_offset_;
+    const char *line_end = str;
+    while (line_end < end && '\n' != *line_end) {
+      ++line_end;
+    }
+    if (line_end >= end) {
+      // The line is not complete in this chunk: leave it for the next one.
+      buffer_offset_ = buffer_size_;
+    } else {
+      int64_t line_len = line_end - str;
+      if (line_len > 0 && '\r' == str[line_len - 1]) {
+        --line_len;
+      }
+      buffer_offset_ += (line_end - str) + 1;
+      if (0 == line_len) {
+        // A blank line is not a document.
+      } else if (OB_FAIL(parse_json_row(ObString(static_cast<int32_t>(line_len), str)))) {
+      } else {
+        batch_row_count_ = 1;
+        row_index_ = 0;
+        parsed = true;
+      }
+    }
   }
   return ret;
 }
@@ -286,33 +323,29 @@ int ObReadFileTableOp::inner_get_next_row()
           break;
         }
       }
-    } else {
-      // The batch is exhausted, the next one is read.
+    } else if (buffer_offset_ >= buffer_size_) {
+      // Every row of the current chunk has been consumed: fetch the next one.
       if (is_eof_) {
         ret = OB_ITER_END;
-        break;
+      } else if (OB_FAIL(read_next_batch())) {
+      } else if (buffer_size_ <= 0 && is_eof_) {
+        ret = OB_ITER_END;
       }
-      if (OB_FAIL(read_next_batch())) {
-        break;
+    } else if (spec_->file_format_ == static_cast<int64_t>(ObFileReadFormat::CSV)) {
+      // One row is parsed per call, the chunk keeps the remaining rows.
+      const int64_t parse_ret = parse_csv_row();
+      if (OB_ITER_END == parse_ret) {
+        // The chunk holds no further row, the next chunk is fetched.
+        buffer_offset_ = buffer_size_;
+      } else if (OB_FAIL(parse_ret)) {
+        ret = parse_ret;
+      } else if (spec_->skip_header_ > 0) {
+        // The rows that the header spans are not data.
+        spec_->skip_header_--;
+        row_values_.reset();
+        batch_row_count_ = 0;
       }
-      if (buffer_size_ <= 0) {
-        if (is_eof_) {
-          ret = OB_ITER_END;
-        }
-        break;
-      }
-      if (spec_->file_format_ == static_cast<int64_t>(ObFileReadFormat::CSV)) {
-        // The header holds the column names, it is not a row.
-        if (OB_FAIL(parse_csv_row())) {
-          break;
-        }
-        if (OB_SUCC(ret) && spec_->skip_header_ > 0) {
-          // The rows that the header spans are not data.
-          spec_->skip_header_--;
-          row_values_.reset();
-          batch_row_count_ = 0;
-        }
-      }
+    } else if (OB_FAIL(parse_next_json_row())) {
     }
   }
   return ret;

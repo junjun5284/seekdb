@@ -641,6 +641,11 @@ int ObTransformerImpl::check_stmt_functions(const ObDMLStmt *stmt, StmtFunc &fun
     if (OB_ISNULL(table)) {
       ret = OB_ERR_UNEXPECTED;
     } else if (!table->is_json_table()) { // do nothing
+    } else if (OB_NOT_NULL(table->json_table_def_)
+               && MulModeTableType::OB_READ_FILE_TABLE_TYPE == table->json_table_def_->table_type_) {
+      // A read-file table is modelled as a json table, but it has no json
+      // document expression at all: it reads a local file, so there is nothing
+      // to correlate and the json-table dependent rules stay disabled.
     } else if (OB_ISNULL(table->json_table_def_) || table->json_table_def_->doc_exprs_.empty()) {
       ret = OB_ERR_UNEXPECTED;
     } else {

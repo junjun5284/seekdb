@@ -84,6 +84,8 @@ private:
   int set_column_datum(const int64_t col_idx, const common::ObString &value);
   // Parses one csv row into the fields of the current row.
   int parse_csv_row();
+  // Parses the next json line of the buffer into the fields of the current row.
+  int parse_next_json_row();
   // Parses one json line into the fields of the current row.
   int parse_json_row(const common::ObString &line);
 private:
