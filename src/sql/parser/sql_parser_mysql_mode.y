@@ -17597,6 +17597,28 @@ literal
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_PARAM, 2, $1, $3);
 }
+| NAME_OB COMP_EQ literal
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_PARAM, 2, $1, $3);
+}
+| NAME_OB COMP_EQ '-' INTNUM
+{
+  // A negative integer option value such as sample_size = -1.  The literal is
+  // rewritten in place so the resolver keeps reading the option as text.
+  ParseNode *num = $4;
+  if (NULL != num) {
+    const int64_t neg_val = -num->value_;
+    char buf[64];
+    const int64_t len = snprintf(buf, sizeof(buf), "%ld", (long)neg_val);
+    if (len > 0 && len < (int64_t)sizeof(buf)) {
+      num->value_ = neg_val;
+      num->str_value_ = parse_strndup(buf, len, result->malloc_pool_);
+      num->str_len_ = (int32_t)len;
+      num->type_ = T_INT;
+    }
+  }
+  malloc_non_terminal_node($$, result->malloc_pool_, T_READ_FILE_TABLE_PARAM, 2, $1, num);
+}
 ;
 
 unreserved_keyword:
